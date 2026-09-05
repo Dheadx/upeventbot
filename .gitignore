@@ -1,0 +1,7 @@
+.env
+.panel_secret
+__pycache__/
+*.pyc
+*.backup
+aff_posts.db
+bot.log

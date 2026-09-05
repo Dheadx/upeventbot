@@ -1,5 +1,5 @@
 import asyncio
-import sqlite3
+import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -14,7 +14,7 @@ from telegram.ext import (
 # AYARLAR
 # =========================================================
 
-TOKEN = "8953491566:AAF7d-i31x09g52ZUyOLy1hEKABofwfpcHk"
+TOKEN = os.getenv("BOT_TOKEN")
 
 # Türkiye saati
 TZ = ZoneInfo("Europe/Istanbul")

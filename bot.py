@@ -1,62 +1,63 @@
 import asyncio
 import os
-import sqlite3
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from telegram import Update
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-)
-
-# =========================================================
-# AYARLAR
-# =========================================================
+import psycopg
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler
 
 TOKEN = os.getenv("BOT_TOKEN")
-
-# Türkiye saati
+DATABASE_URL = os.getenv("DATABASE_URL")
 TZ = ZoneInfo("Europe/Istanbul")
 
-DB = "aff_posts.db"
 
+def db():
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL eksik")
+    return psycopg.connect(DATABASE_URL)
 
-# =========================================================
-# VERİTABANI
-# =========================================================
 
 def init_db():
-    conn = sqlite3.connect(DB)
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS groups (
+                    chat_id BIGINT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    affiliate_link TEXT
+                )
+            """)
 
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS groups (
-            chat_id INTEGER PRIMARY KEY,
-            title TEXT
-        )
-    """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS posts (
+                    id BIGSERIAL PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
+                    text TEXT NOT NULL,
+                    send_time TEXT NOT NULL,
+                    sent INTEGER DEFAULT 0,
+                    sent_at TEXT,
+                    status TEXT DEFAULT 'planned'
+                )
+            """)
 
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS posts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id INTEGER NOT NULL,
-            text TEXT NOT NULL,
-            send_time TEXT NOT NULL,
-            sent INTEGER DEFAULT 0
-        )
-    """)
+            cur.execute("""
+                ALTER TABLE groups
+                ADD COLUMN IF NOT EXISTS affiliate_link TEXT
+            """)
 
-    conn.commit()
-    conn.close()
+            cur.execute("""
+                ALTER TABLE posts
+                ADD COLUMN IF NOT EXISTS sent_at TEXT
+            """)
+
+            cur.execute("""
+                ALTER TABLE posts
+                ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'planned'
+            """)
 
 
-# =========================================================
-# /start
-# =========================================================
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
+async def start(update, context):
     await update.message.reply_text(
         "🤖 AFF Post Manager aktif!\n\n"
         "Komutlar:\n"
@@ -69,23 +70,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# =========================================================
-# TELEGRAM ID
-# =========================================================
-
-async def my_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
+async def my_id(update, context):
     await update.message.reply_text(
         f"Telegram ID'n:\n\n{update.effective_user.id}"
     )
 
 
-# =========================================================
-# GRUP KAYDET
-# =========================================================
-
-async def setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
+async def setup(update, context):
     chat = update.effective_chat
 
     if chat.type not in ["group", "supergroup"]:
@@ -94,15 +85,14 @@ async def setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    conn = sqlite3.connect(DB)
-
-    conn.execute(
-        "INSERT OR REPLACE INTO groups (chat_id, title) VALUES (?, ?)",
-        (chat.id, chat.title)
-    )
-
-    conn.commit()
-    conn.close()
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO groups (chat_id, title)
+                VALUES (%s, %s)
+                ON CONFLICT (chat_id)
+                DO UPDATE SET title = EXCLUDED.title
+            """, (chat.id, chat.title))
 
     await update.message.reply_text(
         f"✅ Grup kaydedildi!\n\n"
@@ -112,14 +102,7 @@ async def setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# =========================================================
-# AFFILIATE LINK KAYDET
-# Kullanım:
-# /link https://ornek.com/partner-link
-# =========================================================
-
-async def set_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
+async def set_link(update, context):
     chat = update.effective_chat
 
     if chat.type not in ["group", "supergroup"]:
@@ -130,7 +113,8 @@ async def set_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if len(context.args) != 1:
         await update.message.reply_text(
-            "Kullanım:\n/link https://partner-link.com/xxxxx"
+            "Kullanım:\n"
+            "/link https://partner-link.com/xxxxx"
         )
         return
 
@@ -142,27 +126,29 @@ async def set_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    conn = sqlite3.connect(DB)
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT title FROM groups WHERE chat_id = %s",
+                (chat.id,)
+            )
+            row = cur.fetchone()
 
-    conn.execute(
-        "UPDATE groups SET affiliate_link = ? WHERE chat_id = ?",
-        (link, chat.id)
-    )
+            if not row:
+                await update.message.reply_text(
+                    "❌ Bu grup henüz kayıtlı değil. "
+                    "Önce /setup kullan."
+                )
+                return
 
-    conn.commit()
-
-    row = conn.execute(
-        "SELECT title FROM groups WHERE chat_id = ?",
-        (chat.id,)
-    ).fetchone()
-
-    conn.close()
-
-    if not row:
-        await update.message.reply_text(
-            "❌ Bu grup henüz kayıtlı değil. Önce /setup kullan."
-        )
-        return
+            cur.execute(
+                """
+                UPDATE groups
+                SET affiliate_link = %s
+                WHERE chat_id = %s
+                """,
+                (link, chat.id)
+            )
 
     await update.message.reply_text(
         f"✅ Affiliate link kaydedildi!\n\n"
@@ -171,15 +157,7 @@ async def set_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# =========================================================
-# POST PLANLA
-#
-# Kullanım:
-# /post 04.09.2026 18:30 Mesaj burada
-# =========================================================
-
-async def add_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
+async def add_post(update, context):
     if not update.message:
         return
 
@@ -222,24 +200,24 @@ async def add_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    conn = sqlite3.connect(DB)
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO posts
+                    (chat_id, text, send_time, sent, status)
+                VALUES
+                    (%s, %s, %s, 0, 'planned')
+                RETURNING id
+                """,
+                (
+                    chat.id,
+                    text,
+                    send_time.isoformat()
+                )
+            )
 
-    cursor = conn.execute(
-        """
-        INSERT INTO posts (chat_id, text, send_time)
-        VALUES (?, ?, ?)
-        """,
-        (
-            chat.id,
-            text,
-            send_time.isoformat()
-        )
-    )
-
-    post_id = cursor.lastrowid
-
-    conn.commit()
-    conn.close()
+            post_id = cur.fetchone()[0]
 
     await update.message.reply_text(
         f"✅ POST PLANLANDI\n\n"
@@ -250,24 +228,18 @@ async def add_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# =========================================================
-# PLANLANAN POSTLAR
-# =========================================================
+async def posts(update, context):
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, chat_id, text, send_time
+                FROM posts
+                WHERE sent = 0
+                  AND status = 'planned'
+                ORDER BY send_time, id
+            """)
 
-async def posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    conn = sqlite3.connect(DB)
-
-    rows = conn.execute(
-        """
-        SELECT id, chat_id, text, send_time
-        FROM posts
-        WHERE sent = 0
-        ORDER BY send_time
-        """
-    ).fetchall()
-
-    conn.close()
+            rows = cur.fetchall()
 
     if not rows:
         await update.message.reply_text(
@@ -278,7 +250,6 @@ async def posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = "📅 PLANLANAN POSTLAR\n\n"
 
     for post_id, chat_id, text, send_time in rows:
-
         dt = datetime.fromisoformat(send_time)
 
         message += (
@@ -290,12 +261,7 @@ async def posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(message)
 
 
-# =========================================================
-# POST İPTAL
-# =========================================================
-
-async def cancel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
+async def cancel_post(update, context):
     if len(context.args) != 1:
         await update.message.reply_text(
             "Kullanım:\n/cancel POST_ID"
@@ -310,19 +276,18 @@ async def cancel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    conn = sqlite3.connect(DB)
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM posts
+                WHERE id = %s
+                  AND sent = 0
+                """,
+                (post_id,)
+            )
 
-    cursor = conn.execute(
-        """
-        DELETE FROM posts
-        WHERE id = ? AND sent = 0
-        """,
-        (post_id,)
-    )
-
-    conn.commit()
-    deleted = cursor.rowcount
-    conn.close()
+            deleted = cur.rowcount
 
     if deleted:
         await update.message.reply_text(
@@ -334,54 +299,100 @@ async def cancel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-# =========================================================
-# ZAMANLAYICI
-# =========================================================
+def claim_post():
+    """
+    Aynı postun iki ayrı scheduler tarafından
+    aynı anda gönderilmesini engeller.
+    """
+
+    now = datetime.now(TZ).isoformat()
+
+    with db() as conn:
+        with conn.cursor() as cur:
+
+            cur.execute("""
+                SELECT
+                    p.id,
+                    p.chat_id,
+                    p.text,
+                    g.affiliate_link
+                FROM posts p
+                LEFT JOIN groups g
+                    ON g.chat_id = p.chat_id
+                WHERE p.sent = 0
+                  AND p.status = 'planned'
+                  AND p.send_time <= %s
+                ORDER BY p.send_time, p.id
+                LIMIT 1
+                FOR UPDATE OF p SKIP LOCKED
+            """, (now,))
+
+            row = cur.fetchone()
+
+            if not row:
+                return None
+
+            post_id, chat_id, text, affiliate_link = row
+
+            cur.execute("""
+                UPDATE posts
+                SET sent = 2,
+                    status = 'sending'
+                WHERE id = %s
+            """, (post_id,))
+
+            return post_id, chat_id, text, affiliate_link
+
+
+def mark_sent(post_id):
+    sent_at = datetime.now(TZ).isoformat()
+
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE posts
+                SET sent = 1,
+                    status = 'sent',
+                    sent_at = %s
+                WHERE id = %s
+            """, (sent_at, post_id))
+
+
+def mark_failed(post_id):
+    with db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE posts
+                SET sent = 0,
+                    status = 'planned'
+                WHERE id = %s
+            """, (post_id,))
+
 
 async def scheduler(bot):
-
     while True:
-
         try:
+            while True:
+                claimed = claim_post()
 
-            now = datetime.now(TZ)
+                if not claimed:
+                    break
 
-            conn = sqlite3.connect(DB)
-
-            rows = conn.execute(
-                """
-                SELECT id, chat_id, text
-                FROM posts
-                WHERE sent = 0
-                AND send_time <= ?
-                ORDER BY send_time
-                """,
-                (now.isoformat(),)
-            ).fetchall()
-
-            for post_id, chat_id, text in rows:
+                post_id, chat_id, text, affiliate_link = claimed
 
                 try:
-
-                    group = conn.execute(
-                        "SELECT affiliate_link FROM groups WHERE chat_id = ?",
-                        (chat_id,)
-                    ).fetchone()
-
-                    affiliate_link = group[0] if group and group[0] else ""
-
-                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-
                     text = text.replace("{LINK}", "").strip()
 
                     reply_markup = None
 
                     if affiliate_link:
                         reply_markup = InlineKeyboardMarkup([
-                            [InlineKeyboardButton(
-                                "🔥 BONUSU AL",
-                                url=affiliate_link
-                            )]
+                            [
+                                InlineKeyboardButton(
+                                    "🔥 BONUSU AL",
+                                    url=affiliate_link
+                                )
+                            ]
                         ])
 
                     await bot.send_message(
@@ -390,41 +401,48 @@ async def scheduler(bot):
                         reply_markup=reply_markup
                     )
 
-                    conn.execute(
-                        "UPDATE posts SET sent = 1 WHERE id = ?",
-                        (post_id,)
-                    )
-
-                    conn.commit()
+                    mark_sent(post_id)
 
                     print(
                         f"POST GÖNDERİLDİ: {post_id}"
                     )
 
                 except Exception as e:
+                    mark_failed(post_id)
 
                     print(
-                        f"Post gönderilemedi {post_id}: {e}"
+                        f"Post gönderilemedi "
+                        f"{post_id}: {e}"
                     )
 
-            conn.close()
-
         except Exception as e:
-
-            print("Scheduler hatası:", e)
+            print(
+                "Scheduler hatası:",
+                e
+            )
 
         await asyncio.sleep(10)
 
 
-# =========================================================
-# BOTU BAŞLAT
-# =========================================================
-
 async def main():
-
     init_db()
 
-    app = Application.builder().token(TOKEN).build()
+    if not TOKEN:
+        raise RuntimeError(
+            "BOT_TOKEN bulunamadı"
+        )
+
+    if not DATABASE_URL:
+        raise RuntimeError(
+            "DATABASE_URL bulunamadı"
+        )
+
+    app = (
+        Application
+        .builder()
+        .token(TOKEN)
+        .build()
+    )
 
     app.add_handler(
         CommandHandler("start", start)

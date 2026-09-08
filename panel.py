@@ -1,5 +1,6 @@
 from flask import Flask, request, redirect, url_for, render_template_string, session
-import sqlite3
+import psycopg
+from psycopg.rows import dict_row
 import os
 import secrets
 from datetime import datetime
@@ -7,7 +8,7 @@ from zoneinfo import ZoneInfo
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-DB = "aff_posts.db"
+DATABASE_URL = os.getenv("DATABASE_URL")
 TZ = ZoneInfo("Europe/Istanbul")
 
 # Kalıcı güvenli session anahtarı
@@ -24,14 +25,20 @@ else:
 
 
 def db():
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
-    return conn
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL eksik")
+    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
 
 
 def column_exists(conn, table, column):
-    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-    return any(row["name"] == column for row in rows)
+    with conn.cursor() as cur:
+        cur.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = %s
+              AND column_name = %s
+        """, (table, column))
+        return cur.fetchone() is not None
 
 
 def init_db():
@@ -112,7 +119,7 @@ def log_action(username, action, post_id=None, chat_id=None, details=None):
     conn.execute("""
         INSERT INTO action_log
         (username, action, post_id, chat_id, details, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s)
     """, (
         username,
         action,
@@ -448,7 +455,7 @@ def page(content, **kwargs):
 @app.route("/login", methods=["GET", "POST"])
 def login():
     conn = db()
-    user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    user_count = conn.execute("SELECT COUNT(*) AS count FROM users").fetchone()["count"]
 
     error = None
 
@@ -464,7 +471,7 @@ def login():
             else:
                 conn.execute("""
                     INSERT INTO users(username,password_hash,created_at)
-                    VALUES(?,?,?)
+                    VALUES(%s,%s,%s)
                 """, (
                     username,
                     generate_password_hash(password),
@@ -479,7 +486,7 @@ def login():
 
         else:
             user = conn.execute(
-                "SELECT * FROM users WHERE username=?",
+                "SELECT * FROM users WHERE username=%s",
                 (username,)
             ).fetchone()
 
@@ -548,22 +555,22 @@ def home():
 
     groups = conn.execute(
         "SELECT COUNT(*) FROM groups"
-    ).fetchone()[0]
+    ).fetchone()["count"]
 
     planned = conn.execute("""
-        SELECT COUNT(*) FROM posts
+        SELECT COUNT(*) AS count FROM posts
         WHERE status='planned' AND sent=0
-    """).fetchone()[0]
+    """).fetchone()["count"]
 
     sent = conn.execute("""
-        SELECT COUNT(*) FROM posts
+        SELECT COUNT(*) AS count FROM posts
         WHERE status='sent' OR sent=1
-    """).fetchone()[0]
+    """).fetchone()["count"]
 
     failed = conn.execute("""
-        SELECT COUNT(*) FROM posts
+        SELECT COUNT(*) AS count FROM posts
         WHERE status='failed'
-    """).fetchone()[0]
+    """).fetchone()["count"]
 
     recent = conn.execute("""
         SELECT posts.*, groups.title
@@ -733,13 +740,14 @@ def new_post():
                     cur = conn.execute("""
                         INSERT INTO posts
                         (chat_id,text,send_time,sent,status)
-                        VALUES(?,?,?,0,'planned')
+                        VALUES(%s,%s,%s,0,'planned')
+                        RETURNING id
                     """, (
                         int(chat_id),
                         text,
                         send_at
                     ))
-                    created_posts.append((cur.lastrowid, int(chat_id)))
+                    created_posts.append((cur.fetchone()["id"], int(chat_id)))
 
                 conn.commit()
                 conn.close()
@@ -874,7 +882,7 @@ def cancel(post_id):
     conn = db()
 
     post = conn.execute(
-        "SELECT * FROM posts WHERE id=?",
+        "SELECT * FROM posts WHERE id=%s",
         (post_id,)
     ).fetchone()
 
@@ -882,7 +890,7 @@ def cancel(post_id):
         conn.execute("""
             UPDATE posts
             SET status='cancelled', sent=1
-            WHERE id=?
+            WHERE id=%s
         """, (post_id,))
         conn.commit()
 

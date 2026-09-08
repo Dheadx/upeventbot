@@ -363,6 +363,15 @@ async def scheduler(bot):
 
                 try:
 
+                    locked = conn.execute(
+                        "UPDATE posts SET sent = 2 WHERE id = ? AND sent = 0",
+                        (post_id,)
+                    ).rowcount
+                    conn.commit()
+
+                    if locked != 1:
+                        continue
+
                     group = conn.execute(
                         "SELECT affiliate_link FROM groups WHERE chat_id = ?",
                         (chat_id,)

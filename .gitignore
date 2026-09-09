@@ -5,3 +5,6 @@ __pycache__/
 *.backup
 aff_posts.db
 bot.log
+
+bot.py.sqlite-backup
+panel.py.sqlite-backup

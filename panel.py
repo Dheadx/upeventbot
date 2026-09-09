@@ -453,7 +453,7 @@ def page(content, **kwargs):
 @app.route("/login", methods=["GET", "POST"])
 def login():
     conn = db()
-    user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()["count"]
 
     error = None
 
@@ -553,22 +553,22 @@ def home():
 
     groups = conn.execute(
         "SELECT COUNT(*) FROM groups"
-    ).fetchone()[0]
+    ).fetchone()["count"]
 
     planned = conn.execute("""
         SELECT COUNT(*) FROM posts
         WHERE status='planned' AND sent=0
-    """).fetchone()[0]
+    """).fetchone()["count"]
 
     sent = conn.execute("""
         SELECT COUNT(*) FROM posts
         WHERE status='sent' OR sent=1
-    """).fetchone()[0]
+    """).fetchone()["count"]
 
     failed = conn.execute("""
         SELECT COUNT(*) FROM posts
         WHERE status='failed'
-    """).fetchone()[0]
+    """).fetchone()["count"]
 
     recent = conn.execute("""
         SELECT posts.*, groups.title

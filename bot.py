@@ -43,7 +43,8 @@ def init_db():
             chat_id INTEGER NOT NULL,
             text TEXT NOT NULL,
             send_time TEXT NOT NULL,
-            sent INTEGER DEFAULT 0
+            sent INTEGER DEFAULT 0,
+            image_file_id TEXT
         )
     """)
 
@@ -260,7 +261,7 @@ async def posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     rows = conn.execute(
         """
-        SELECT id, chat_id, text, send_time
+        SELECT id, chat_id, text, image_data, send_time
         FROM posts
         WHERE sent = 0
         ORDER BY send_time
@@ -350,7 +351,7 @@ async def scheduler(bot):
 
             rows = conn.execute(
                 """
-                SELECT id, chat_id, text
+                SELECT id, chat_id, text, image_data
                 FROM posts
                 WHERE sent = 0
                 AND send_time <= %s
@@ -359,7 +360,7 @@ async def scheduler(bot):
                 (now.isoformat(),)
             ).fetchall()
 
-            for post_id, chat_id, text in rows:
+            for post_id, chat_id, text, image_data in rows:
 
                 try:
 
@@ -393,11 +394,20 @@ async def scheduler(bot):
                             )]
                         ])
 
-                    await bot.send_message(
-                        chat_id=chat_id,
-                        text=text,
-                        reply_markup=reply_markup
-                    )
+                    if image_data:
+                        from io import BytesIO
+                        await bot.send_photo(
+                            chat_id=chat_id,
+                            photo=BytesIO(image_data),
+                            caption=text,
+                            reply_markup=reply_markup
+                        )
+                    else:
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=text,
+                            reply_markup=reply_markup
+                        )
 
                     conn.execute(
                         "UPDATE posts SET sent = 1 WHERE id = %s",

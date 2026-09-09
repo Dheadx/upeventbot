@@ -69,6 +69,10 @@ def init_db():
     if not column_exists(conn, "posts", "sent_at"):
         conn.execute("ALTER TABLE posts ADD COLUMN sent_at TEXT")
 
+    if not column_exists(conn, "posts", "image_file_id"):
+        conn.execute("ALTER TABLE posts ADD COLUMN image_file_id TEXT")
+        conn.execute("ALTER TABLE posts ADD COLUMN image_data BYTEA")
+
     if not column_exists(conn, "posts", "status"):
         conn.execute("ALTER TABLE posts ADD COLUMN status TEXT DEFAULT 'planned'")
 
@@ -513,7 +517,7 @@ def login():
 
             {f'<div class="err">{error}</div>' if error else ''}
 
-            <form method="post">
+            <form method="post" enctype="multipart/form-data">
                 {setup_text}
 
                 <label>Kullanıcı adı</label>
@@ -719,6 +723,8 @@ def new_post():
         chat_ids = request.form.getlist("chat_ids")
         text = request.form.get("text", "").strip()
         send_at = request.form.get("send_at", "").strip()
+        image = request.files.get("image")
+        image_data = image.read() if image and image.filename else None
 
         if not chat_ids:
             error = "En az bir Telegram grubu seçmelisin."
@@ -737,12 +743,13 @@ def new_post():
                 for chat_id in chat_ids:
                     cur = conn.execute("""
                         INSERT INTO posts
-                        (chat_id,text,send_time,sent,status)
-                        VALUES(%s,%s,%s,0,'planned')
+                        (chat_id,text,send_time,sent,status,image_data)
+                        VALUES(%s,%s,%s,0,'planned',%s)
                     """, (
                         int(chat_id),
                         text,
-                        send_at
+                        send_at,
+                        image_data
                     ))
                     created_posts.append((cur.lastrowid, int(chat_id)))
 
@@ -786,12 +793,15 @@ def new_post():
     {f'<div class="err">{error}</div>' if error else ''}
 
     <div class="box">
-        <form method="post">
+        <form method="post" enctype="multipart/form-data">
 
             <label><input type="checkbox" id="selectAllGroups" onchange="document.querySelectorAll(&quot;input[name=chat_ids]&quot;).forEach(cb =&gt; cb.checked = this.checked)"> Tüm Grupları Seç</label>
             <div class="checkbox-list">
                 {group_options if group_options else '<p class="muted">Önce Telegram grubunda /setup kullanmalısın.</p>'}
             </div>
+
+            <label>Görsel (Opsiyonel)</label>
+            <input type="file" name="image" accept="image/*">
 
             <label>Post Metni</label>
             <textarea

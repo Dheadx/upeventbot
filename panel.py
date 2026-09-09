@@ -828,23 +828,34 @@ def planned():
 
     rows = ""
 
+    grouped = {}
     for p in posts:
+        key = (p["text"], p["send_time"])
+        grouped.setdefault(key, []).append(p)
+
+    for (post_text, send_time), group_posts in grouped.items():
+        groups_text = "<br>".join(
+            f'• {p["title"] or "Bilinmeyen grup"}'
+            for p in group_posts
+        )
+        cancel_links = " ".join(
+            f'<a class="btn btn-danger" href="/cancel/{p["id"]}" '
+            f'onclick="return confirm(\'Bu post iptal edilsin mi?\')">İptal</a>'
+            for p in group_posts
+        )
+
         rows += f"""
         <tr>
-            <td><strong>{p["title"] or "Bilinmeyen grup"}</strong><br>
-                <span class="muted small">{p["chat_id"]}</span>
+            <td>
+                <strong>Gönderilecek Gruplar</strong><br>
+                <span class="muted small">{groups_text}</span>
             </td>
-            <td class="post-text">{p["text"]}</td>
-            <td><strong>{p["send_time"]}</strong></td>
+            <td class="post-text">{post_text}</td>
+            <td><strong>{send_time}</strong></td>
             <td>
                 <span class="badge badge-planned">BEKLEYEN</span>
             </td>
-            <td>
-                <a class="btn btn-danger" href="/cancel/{p["id"]}"
-                   onclick="return confirm('Bu post iptal edilsin mi?')">
-                   İptal
-                </a>
-            </td>
+            <td>{cancel_links}</td>
         </tr>
         """
 

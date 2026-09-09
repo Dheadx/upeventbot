@@ -146,7 +146,7 @@ async def set_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = psycopg.connect(DATABASE_URL)
 
     conn.execute(
-        "UPDATE groups SET affiliate_link = ? WHERE chat_id = %s",
+        "UPDATE groups SET affiliate_link = %s WHERE chat_id = %s",
         (link, chat.id)
     )
 

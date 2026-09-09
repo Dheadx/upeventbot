@@ -745,13 +745,14 @@ def new_post():
                         INSERT INTO posts
                         (chat_id,text,send_time,sent,status,image_data)
                         VALUES(%s,%s,%s,0,'planned',%s)
+                        RETURNING id
                     """, (
                         int(chat_id),
                         text,
                         send_at,
                         image_data
                     ))
-                    created_posts.append((cur.lastrowid, int(chat_id)))
+                    created_posts.append((cur.fetchone()["id"], int(chat_id)))
 
                 conn.commit()
                 conn.close()

@@ -388,7 +388,7 @@ async def scheduler(bot):
                     if affiliate_link:
                         reply_markup = InlineKeyboardMarkup([
                             [InlineKeyboardButton(
-                                "🔥 BONUSU AL",
+                                "🔗 UltraPari'ye Giriş",
                                 url=affiliate_link
                             )]
                         ])

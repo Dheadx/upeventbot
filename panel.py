@@ -738,7 +738,7 @@ def new_post():
                     cur = conn.execute("""
                         INSERT INTO posts
                         (chat_id,text,send_time,sent,status)
-                        VALUES(?,?,?,0,'planned')
+                        VALUES(%s,%s,%s,0,'planned')
                     """, (
                         int(chat_id),
                         text,

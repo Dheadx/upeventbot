@@ -923,20 +923,41 @@ def sent():
 
     rows = ""
 
+    grouped = {}
     for p in posts:
-        if p["status"] == "cancelled":
-            badge = '<span class="badge badge-cancelled">İPTAL</span>'
-        elif p["status"] == "failed":
+        key = (p["text"], p["send_time"])
+        grouped.setdefault(key, []).append(p)
+
+    for (post_text, send_time), group_posts in grouped.items():
+        groups_text = "<br>".join(
+            f'• {p["title"] or "Bilinmeyen grup"}'
+            for p in group_posts
+        )
+
+        statuses = {p["status"] for p in group_posts}
+        if "failed" in statuses:
             badge = '<span class="badge badge-failed">HATA</span>'
+        elif "cancelled" in statuses:
+            badge = '<span class="badge badge-cancelled">İPTAL</span>'
         else:
             badge = '<span class="badge badge-sent">GÖNDERİLDİ</span>'
 
+        sent_times = [
+            format_time(p["sent_at"])
+            for p in group_posts
+            if p["sent_at"]
+        ]
+        sent_time = min(sent_times) if sent_times else "-"
+
         rows += f"""
         <tr>
-            <td><strong>{p["title"] or "Bilinmeyen grup"}</strong></td>
-            <td class="post-text">{p["text"]}</td>
-            <td><strong>{format_time(p["send_time"])}</strong></td>
-            <td>{format_time(p["sent_at"])}</td>
+            <td>
+                <strong>Gönderildiği Gruplar</strong><br>
+                <span class="muted small">{groups_text}</span>
+            </td>
+            <td class="post-text">{post_text}</td>
+            <td><strong>{format_time(send_time)}</strong></td>
+            <td>{sent_time}</td>
             <td>{badge}</td>
         </tr>
         """

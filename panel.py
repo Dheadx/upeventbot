@@ -783,7 +783,7 @@ def new_post():
     <div class="box">
         <form method="post">
 
-            <label>Telegram Grupları</label>
+            <label><input type="checkbox" id="selectAllGroups" onchange="document.querySelectorAll(&quot;input[name=chat_ids]&quot;).forEach(cb =&gt; cb.checked = this.checked)"> Tüm Grupları Seç</label>
             <div class="checkbox-list">
                 {group_options if group_options else '<p class="muted">Önce Telegram grubunda /setup kullanmalısın.</p>'}
             </div>

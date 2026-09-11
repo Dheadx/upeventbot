@@ -741,6 +741,18 @@ def new_post():
                 created_posts = []
 
                 for chat_id in chat_ids:
+                    existing = conn.execute("""
+                        SELECT id FROM posts
+                        WHERE chat_id = %s
+                          AND text = %s
+                          AND send_time = %s
+                          AND sent = 0
+                        LIMIT 1
+                    """, (int(chat_id), text, send_at)).fetchone()
+
+                    if existing:
+                        continue
+
                     cur = conn.execute("""
                         INSERT INTO posts
                         (chat_id,text,send_time,sent,status,image_data)

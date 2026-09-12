@@ -678,6 +678,12 @@ def groups_page():
 
         cards += f"""
         <div class="group-card">
+            <form method="post" action="/groups/link" style="margin-top:10px;">
+                <input type="hidden" name="chat_id" value="{g["chat_id"]}">
+                <input type="url" name="affiliate_link" value="{link or ""}"
+                       placeholder="Affiliate link" style="width:70%;">
+                <button type="submit">💾 Kaydet</button>
+            </form>
             <div>
                 <strong>{g["title"] or "İsimsiz Grup"}</strong><br>
                 <span class="muted small">Chat ID: {g["chat_id"]}</span>
